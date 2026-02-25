@@ -3,6 +3,7 @@ import { config } from './config';
 import { logger } from './logger';
 import { createHttpServer } from './http/server';
 import { adminRouter } from './http/routes/admin';
+import { setupBullBoard } from './http/bullBoard';
 import { createWebSocketServer } from './websocket/server';
 import { startWorker } from './queue/worker';
 
@@ -16,12 +17,16 @@ async function main(): Promise<void> {
   // 3. Registra rota admin (precisa do wss já criado)
   app.use(adminRouter(wss));
 
-  // 4. Inicia o BullMQ Worker
+  // 4. Monta o Bull Board em /admin/queues (protegido por API key)
+  setupBullBoard(app);
+
+  // 5. Inicia o BullMQ Worker
   startWorker(wss);
 
-  // 5. Sobe o servidor na porta configurada
+  // 6. Sobe o servidor na porta configurada
   server.listen(config.http.port, () => {
     logger.info('Email worker running', { port: config.http.port });
+    logger.info('Bull Board available at /admin/queues (requires X-Admin-Key header)');
   });
 }
 

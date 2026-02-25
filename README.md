@@ -16,7 +16,10 @@ Driver Backend
 email-worker
   ├── Worker BullMQ → processa job → envia e-mail (Resend ou SMTP)
   ├── WebSocket Server → emite email:status (sent | failed) para clientes
-  └── HTTP Server → GET /health · POST /admin/message
+  └── HTTP Server
+        ├── GET  /health              (pública)
+        ├── POST /admin/message       (X-Admin-Key)
+        └── GET  /admin/queues        (Basic Auth — Bull Board UI)
 ```
 
 ---
@@ -29,7 +32,7 @@ email-worker
 |---|---|
 | `family_invite` | Envia e-mail de convite para um membro ingressar em uma família |
 | `forgot_password` | Envia e-mail com link de redefinição de senha |
-| `broadcast_message` | (futuro) Emite mensagem via WebSocket sem envio de e-mail |
+| `broadcast_message` | Emite mensagem via WebSocket para todos os clientes (sem envio de e-mail) |
 
 ### Eventos WebSocket emitidos
 
@@ -43,7 +46,24 @@ email-worker
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
 | `GET` | `/health` | Pública | Status do serviço |
-| `POST` | `/admin/message` | `X-Admin-Key` | Envia mensagem broadcast para todos os clientes WebSocket |
+| `POST` | `/admin/message` | Header `X-Admin-Key` | Envia mensagem broadcast para todos os clientes WebSocket |
+| `GET` | `/admin/queues` | Basic Auth | Bull Board — dashboard visual da fila BullMQ |
+
+### Bull Board
+
+Dashboard web em `/admin/queues` que exibe em tempo real o estado da fila de emails:
+
+- Jobs pendentes, ativos, concluídos e falhos
+- Payload de cada job
+- Histórico de tentativas e erros
+- Opção de **reprocessar jobs falhos** com um clique
+- Opção de **adicionar jobs manualmente** pela interface (para testes)
+
+**Acesso via browser:**
+```
+https://seu-servico.railway.app/admin/queues
+```
+O browser solicita usuário e senha. Use qualquer username (ex: `admin`) e a `ADMIN_API_KEY` como senha.
 
 ---
 
@@ -115,7 +135,7 @@ Emitido após cada job de e-mail ser concluído ou falhar definitivamente.
   "jobId": "1",
   "type": "family_invite",
   "status": "sent",
-  "error": "mensagem genérica (apenas em status: failed)"
+  "email": "destinatario@exemplo.com"
 }
 ```
 
@@ -125,6 +145,7 @@ Emitido após cada job de e-mail ser concluído ou falhar definitivamente.
 | `jobId` | `string` | ID do job BullMQ |
 | `type` | `string` | `family_invite` ou `forgot_password` |
 | `status` | `string` | `"sent"` ou `"failed"` |
+| `email` | `string?` | Presente em `sent`. Endereço de destino do e-mail enviado |
 | `error` | `string?` | Presente apenas em `failed`. Mensagem genérica, sem tokens |
 
 ### Evento `message`
@@ -201,6 +222,45 @@ curl -X POST https://seu-servico.railway.app/admin/message \
 
 ---
 
+## Provedores de email
+
+### Gmail SMTP (gratuito, sem domínio)
+
+A opção mais simples e sem custo. Usa uma conta Gmail como servidor de envio.
+
+**Pré-requisitos:**
+1. Ative a verificação em duas etapas na conta Google
+2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
+3. Crie uma senha de app (selecione "Outro" e dê o nome "email-worker")
+4. Copie a senha gerada (formato: `xxxx xxxx xxxx xxxx`)
+
+**Configuração:**
+```env
+EMAIL_PROVIDER=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=seuapp@gmail.com
+SMTP_PASS=xxxx xxxx xxxx xxxx
+SMTP_FROM=seuapp@gmail.com
+```
+
+Limite: ~500 emails/dia. Remetente aparece como `seuapp@gmail.com`.
+
+---
+
+### Resend (gratuito com domínio próprio)
+
+3.000 emails/mês, 100/dia — permanentemente gratuito. Requer domínio verificado para envio irrestrito.
+
+**Configuração:**
+```env
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_xxxxxxxxxxxx
+RESEND_FROM=noreply@seudominio.com
+```
+
+---
+
 ## Variáveis de ambiente
 
 Copie `.env.example` para `.env` e preencha os valores.
@@ -229,7 +289,7 @@ Copie `.env.example` para `.env` e preencha os valores.
 
 - Node.js 20+
 - Redis rodando localmente (`redis://localhost:6379`)
-- Conta no [Resend](https://resend.com) (ou servidor SMTP)
+- Provedor de e-mail configurado: Gmail SMTP (gratuito, veja seção acima) ou Resend
 
 ### Instalação
 
@@ -302,7 +362,7 @@ O Driver backend publica jobs via BullMQ. Os payloads devem seguir este contrato
 }
 ```
 
-### `broadcast_message` (futuro)
+### `broadcast_message`
 
 ```typescript
 {
