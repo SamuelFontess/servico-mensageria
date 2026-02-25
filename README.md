@@ -224,15 +224,48 @@ curl -X POST https://seu-servico.railway.app/admin/message \
 
 ## Provedores de email
 
-### Gmail SMTP (gratuito, sem domínio)
+> **Railway free/hobby plan:** As portas SMTP (25, 465, 587, 2525) são bloqueadas. Use **Brevo** ou **Resend** — ambos enviam via HTTP API (porta 443).
 
-A opção mais simples e sem custo. Usa uma conta Gmail como servidor de envio.
+### Brevo (recomendado — gratuito, sem domínio)
+
+300 emails/dia gratuitos, para sempre. Não requer domínio próprio — basta verificar o e-mail remetente. Usa HTTP API (porta 443), compatível com Railway free.
 
 **Pré-requisitos:**
-1. Ative a verificação em duas etapas na conta Google
-2. Acesse [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Crie uma senha de app (selecione "Outro" e dê o nome "email-worker")
-4. Copie a senha gerada (formato: `xxxx xxxx xxxx xxxx`)
+1. Crie uma conta em [brevo.com](https://brevo.com)
+2. Vá em **Settings → Senders & IPs → Senders** e adicione/verifique seu e-mail remetente (ex: `seuapp@gmail.com`)
+3. Vá em **Settings → API Keys** e crie uma API Key
+4. Copie a chave gerada
+
+**Configuração:**
+```env
+EMAIL_PROVIDER=brevo
+BREVO_API_KEY=xkeysib-xxxxxxxxxxxx
+BREVO_FROM=seuapp@gmail.com
+BREVO_FROM_NAME=Driver App
+```
+
+Limite: 300 emails/dia. Remetente aparece como o e-mail verificado.
+
+---
+
+### Resend (gratuito com domínio próprio)
+
+3.000 emails/mês, 100/dia — permanentemente gratuito. Requer domínio verificado para envio em produção (endereço `from` personalizado).
+
+**Configuração:**
+```env
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_xxxxxxxxxxxx
+RESEND_FROM=noreply@seudominio.com
+```
+
+---
+
+### Gmail SMTP (apenas desenvolvimento local)
+
+> **Não funciona no Railway free/hobby** — portas SMTP bloqueadas.
+
+Útil apenas para testes locais. Requer verificação em duas etapas e senha de app.
 
 **Configuração:**
 ```env
@@ -242,21 +275,6 @@ SMTP_PORT=587
 SMTP_USER=seuapp@gmail.com
 SMTP_PASS=xxxx xxxx xxxx xxxx
 SMTP_FROM=seuapp@gmail.com
-```
-
-Limite: ~500 emails/dia. Remetente aparece como `seuapp@gmail.com`.
-
----
-
-### Resend (gratuito com domínio próprio)
-
-3.000 emails/mês, 100/dia — permanentemente gratuito. Requer domínio verificado para envio irrestrito.
-
-**Configuração:**
-```env
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=re_xxxxxxxxxxxx
-RESEND_FROM=noreply@seudominio.com
 ```
 
 ---
@@ -269,10 +287,13 @@ Copie `.env.example` para `.env` e preencha os valores.
 |---|---|---|---|
 | `REDIS_URL` | Sim | — | URL de conexão com o Redis (ex: `redis://localhost:6379`) |
 | `ADMIN_API_KEY` | Sim | — | Chave para autenticar chamadas ao `POST /admin/message` |
-| `EMAIL_PROVIDER` | Não | `resend` | Provedor de e-mail: `resend` ou `smtp` |
+| `EMAIL_PROVIDER` | Não | `resend` | Provedor de e-mail: `brevo`, `resend` ou `smtp` |
+| `BREVO_API_KEY` | Se provider=brevo | — | Chave de API do Brevo (Settings → API Keys) |
+| `BREVO_FROM` | Se provider=brevo | — | E-mail remetente verificado no Brevo |
+| `BREVO_FROM_NAME` | Se provider=brevo | `Driver App` | Nome exibido no remetente |
 | `RESEND_API_KEY` | Se provider=resend | — | Chave de API do Resend |
-| `RESEND_FROM` | Se provider=resend | — | E-mail remetente (ex: `noreply@dominio.com`) |
-| `SMTP_HOST` | Se provider=smtp | — | Host do servidor SMTP |
+| `RESEND_FROM` | Se provider=resend | — | E-mail remetente (requer domínio verificado) |
+| `SMTP_HOST` | Se provider=smtp | — | Host SMTP (apenas dev local — bloqueado no Railway free) |
 | `SMTP_PORT` | Se provider=smtp | `587` | Porta SMTP |
 | `SMTP_USER` | Se provider=smtp | — | Usuário SMTP |
 | `SMTP_PASS` | Se provider=smtp | — | Senha SMTP |

@@ -11,7 +11,7 @@ function optionalInt(key: string, fallback: number): number {
   return isFinite(val) && val > 0 ? val : fallback;
 }
 
-const emailProvider = (process.env.EMAIL_PROVIDER ?? 'resend') as 'resend' | 'smtp';
+const emailProvider = (process.env.EMAIL_PROVIDER ?? 'resend') as 'resend' | 'smtp' | 'brevo';
 
 if (emailProvider === 'resend') {
   required('RESEND_API_KEY');
@@ -21,8 +21,11 @@ if (emailProvider === 'resend') {
   required('SMTP_USER');
   required('SMTP_PASS');
   required('SMTP_FROM');
+} else if (emailProvider === 'brevo') {
+  required('BREVO_API_KEY');
+  required('BREVO_FROM');
 } else {
-  throw new Error(`Invalid EMAIL_PROVIDER: "${emailProvider}". Must be "resend" or "smtp".`);
+  throw new Error(`Invalid EMAIL_PROVIDER: "${emailProvider}". Must be "resend", "smtp" or "brevo".`);
 }
 
 export const config = {
@@ -48,6 +51,11 @@ export const config = {
       user: process.env.SMTP_USER ?? '',
       pass: process.env.SMTP_PASS ?? '',
       from: process.env.SMTP_FROM ?? '',
+    },
+    brevo: {
+      apiKey: process.env.BREVO_API_KEY ?? '',
+      from: process.env.BREVO_FROM ?? '',
+      fromName: process.env.BREVO_FROM_NAME ?? 'Driver App',
     },
   },
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:3001',
