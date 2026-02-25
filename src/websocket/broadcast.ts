@@ -5,6 +5,7 @@ export type EmailStatusEvent = {
   jobId: string;
   type: 'family_invite' | 'forgot_password';
   status: 'sent' | 'failed';
+  email?: string;
   error?: string;
 };
 

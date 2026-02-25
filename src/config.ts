@@ -11,6 +11,20 @@ function optionalInt(key: string, fallback: number): number {
   return isFinite(val) && val > 0 ? val : fallback;
 }
 
+const emailProvider = (process.env.EMAIL_PROVIDER ?? 'resend') as 'resend' | 'smtp';
+
+if (emailProvider === 'resend') {
+  required('RESEND_API_KEY');
+  required('RESEND_FROM');
+} else if (emailProvider === 'smtp') {
+  required('SMTP_HOST');
+  required('SMTP_USER');
+  required('SMTP_PASS');
+  required('SMTP_FROM');
+} else {
+  throw new Error(`Invalid EMAIL_PROVIDER: "${emailProvider}". Must be "resend" or "smtp".`);
+}
+
 export const config = {
   redis: {
     url: required('REDIS_URL'),
@@ -23,7 +37,7 @@ export const config = {
     adminApiKey: required('ADMIN_API_KEY'),
   },
   email: {
-    provider: (process.env.EMAIL_PROVIDER ?? 'resend') as 'resend' | 'smtp',
+    provider: emailProvider,
     resend: {
       apiKey: process.env.RESEND_API_KEY ?? '',
       from: process.env.RESEND_FROM ?? '',

@@ -66,11 +66,14 @@ export function startWorker(wss: WebSocket.Server): Worker {
     logger.info('Job completed', { jobId: job.id, type: job.name });
 
     if (job.name === 'family_invite' || job.name === 'forgot_password') {
+      const data = job.data as { invitedEmail?: string; email?: string };
+      const email = data?.invitedEmail ?? data?.email;
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',
         type: job.name,
         status: 'sent',
+        ...(email && { email }),
       });
     }
   });
