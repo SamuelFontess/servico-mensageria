@@ -26,7 +26,14 @@ async function main(): Promise<void> {
   const broadcastWorker = startBroadcastWorker(wss);
 
   // 6. Graceful shutdown: aguarda jobs em andamento antes de encerrar
+  let isShuttingDown = false;
+
   async function shutdown(signal: string): Promise<void> {
+    if (isShuttingDown) {
+      logger.warn(`Received ${signal} during shutdown, ignoring`);
+      return;
+    }
+    isShuttingDown = true;
     logger.info(`Received ${signal}, shutting down gracefully`);
     const forceExit = setTimeout(() => {
       logger.error('Graceful shutdown timed out, forcing exit');
