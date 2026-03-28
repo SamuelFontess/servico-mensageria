@@ -11,23 +11,6 @@ function optionalInt(key: string, fallback: number): number {
   return isFinite(val) && val > 0 ? val : fallback;
 }
 
-const emailProvider = (process.env.EMAIL_PROVIDER ?? 'resend') as 'resend' | 'smtp' | 'brevo';
-
-if (emailProvider === 'resend') {
-  required('RESEND_API_KEY');
-  required('RESEND_FROM');
-} else if (emailProvider === 'smtp') {
-  required('SMTP_HOST');
-  required('SMTP_USER');
-  required('SMTP_PASS');
-  required('SMTP_FROM');
-} else if (emailProvider === 'brevo') {
-  required('BREVO_API_KEY');
-  required('BREVO_FROM');
-} else {
-  throw new Error(`Invalid EMAIL_PROVIDER: "${emailProvider}". Must be "resend", "smtp" or "brevo".`);
-}
-
 export const config = {
   redis: {
     url: required('REDIS_URL'),
@@ -38,23 +21,14 @@ export const config = {
   http: {
     port: optionalInt('PORT', 3002),
     adminApiKey: required('ADMIN_API_KEY'),
+    // Comma-separated list of allowed IPs for Bull Board (optional).
+    // If empty, any IP with valid credentials can access it.
+    bullBoardAllowedIps: process.env.BULL_BOARD_ALLOWED_IPS ?? '',
   },
   email: {
-    provider: emailProvider,
-    resend: {
-      apiKey: process.env.RESEND_API_KEY ?? '',
-      from: process.env.RESEND_FROM ?? '',
-    },
-    smtp: {
-      host: process.env.SMTP_HOST ?? '',
-      port: optionalInt('SMTP_PORT', 587),
-      user: process.env.SMTP_USER ?? '',
-      pass: process.env.SMTP_PASS ?? '',
-      from: process.env.SMTP_FROM ?? '',
-    },
     brevo: {
-      apiKey: process.env.BREVO_API_KEY ?? '',
-      from: process.env.BREVO_FROM ?? '',
+      apiKey: required('BREVO_API_KEY'),
+      from: required('BREVO_FROM'),
       fromName: process.env.BREVO_FROM_NAME ?? 'Driver App',
     },
   },
