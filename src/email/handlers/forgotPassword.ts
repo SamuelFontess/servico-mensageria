@@ -9,8 +9,13 @@ function minutesUntil(isoDate: string): number {
 }
 
 export async function handleForgotPassword(payload: ForgotPasswordPayload): Promise<void> {
+  const remaining = minutesUntil(payload.expiresAt);
+  if (remaining === 0) {
+    throw new Error(`Password reset token already expired for ${payload.email} (expiresAt: ${payload.expiresAt})`);
+  }
+
   const resetLink = `${config.frontendUrl}/reset-password?token=${payload.token}`;
-  const expiresIn = String(minutesUntil(payload.expiresAt));
+  const expiresIn = String(remaining);
 
   const html = renderTemplate('forgot-password.html', {
     resetLink,
