@@ -1,11 +1,16 @@
 import { config } from '../../config';
 import { sendEmail } from '../send';
 import { renderTemplate } from '../template';
+import { logger } from '../../logger';
 import type { ForgotPasswordPayload } from '../../queue/types';
 
 export async function handleForgotPassword(payload: ForgotPasswordPayload): Promise<void> {
   if (new Date(payload.expiresAt).getTime() <= Date.now()) {
-    throw new Error(`Password reset token already expired for ${payload.email} (expiresAt: ${payload.expiresAt})`);
+    logger.warn('Password reset token already expired, skipping email', {
+      userId: payload.userId,
+      expiresAt: payload.expiresAt,
+    });
+    throw new Error('Password reset token already expired');
   }
 
   const remaining = Math.max(1, Math.round((new Date(payload.expiresAt).getTime() - Date.now()) / 60_000));
