@@ -16,6 +16,8 @@ services:
       FRONTEND_URL: ${FRONTEND_URL}
       ADMIN_API_KEY: ${ADMIN_API_KEY}
       BULL_BOARD_ALLOWED_IPS: ${BULL_BOARD_ALLOWED_IPS:-}
+    ports:
+      - "127.0.0.1:3002:3002"  # exposto só para localhost — acesso via SSH tunnel
     networks:
       - driver_net
 
