@@ -1,19 +1,16 @@
 import { Worker, Job } from 'bullmq';
-import Redis from 'ioredis';
 import type WebSocket from 'ws';
-import { config } from '../config';
+import { createRedisConnection } from '../redis';
 import { logger } from '../logger';
 import { handleFamilyInvite } from '../email/handlers/familyInvite';
 import { handleForgotPassword } from '../email/handlers/forgotPassword';
 import { broadcast } from '../websocket/broadcast';
-import type {
-  FamilyInvitePayload,
-  ForgotPasswordPayload,
-  BroadcastMessagePayload,
-} from './types';
-import { randomUUID } from 'crypto';
+import type { FamilyInvitePayload, ForgotPasswordPayload } from './types';
 
-async function dispatch(job: Job, wss: WebSocket.Server): Promise<void> {
+// NOTE: retry attempts and backoff must be configured by the producer when enqueuing.
+// Recommended: { attempts: 3, backoff: { type: 'exponential', delay: 2000 } }
+
+async function dispatch(job: Job): Promise<void> {
   switch (job.name) {
     case 'family_invite':
       await handleFamilyInvite(job.data as FamilyInvitePayload);
@@ -23,38 +20,19 @@ async function dispatch(job: Job, wss: WebSocket.Server): Promise<void> {
       await handleForgotPassword(job.data as ForgotPasswordPayload);
       break;
 
-    case 'broadcast_message': {
-      const payload = job.data as BroadcastMessagePayload;
-      broadcast(wss, {
-        event: 'message',
-        id: job.id ?? randomUUID(),
-        type: payload.type,
-        content: payload.content,
-        createdAt: new Date().toISOString(),
-        target: payload.target ?? 'broadcast',
-      });
-      break;
-    }
-
     default:
       throw new Error(`Unknown job type: ${job.name}`);
   }
 }
 
 export function startWorker(wss: WebSocket.Server): Worker {
-  const connection = new Redis(config.redis.url, {
-    maxRetriesPerRequest: null,
-  });
-
-  connection.on('error', (err) => {
-    logger.warn('Worker Redis connection error', { error: err.message });
-  });
+  const connection = createRedisConnection();
 
   const worker = new Worker(
     'email',
     async (job: Job) => {
       logger.info('Processing job', { jobId: job.id, type: job.name });
-      await dispatch(job, wss);
+      await dispatch(job);
     },
     {
       connection,
@@ -80,9 +58,16 @@ export function startWorker(wss: WebSocket.Server): Worker {
 
   worker.on('failed', (job, err) => {
     if (!job) return;
-    logger.error('Job failed', { jobId: job.id, type: job.name, error: err.message });
+    logger.error('Job failed', {
+      jobId: job.id,
+      type: job.name,
+      attempt: job.attemptsMade,
+      maxAttempts: job.opts.attempts ?? 1,
+      error: err.message,
+    });
 
-    if (job.name === 'family_invite' || job.name === 'forgot_password') {
+    const isFinal = job.attemptsMade >= (job.opts.attempts ?? 1);
+    if (isFinal && (job.name === 'family_invite' || job.name === 'forgot_password')) {
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',

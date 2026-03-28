@@ -1,24 +1,26 @@
 # email-worker
 
-Serviço de mensageria responsável por consumir jobs da fila Redis (BullMQ), enviar e-mails transacionais e emitir eventos em tempo real via WebSocket.
+Serviço de mensageria responsável por consumir jobs das filas Redis (BullMQ), enviar e-mails transacionais e emitir eventos em tempo real via WebSocket.
 
 ---
 
 ## Visão geral
 
-O Driver backend publica jobs numa fila Redis gerenciada pelo BullMQ. Este serviço consome esses jobs de forma assíncrona, processa o envio de e-mail e notifica os clientes conectados sobre o resultado via WebSocket.
+O Driver backend publica jobs em filas Redis gerenciadas pelo BullMQ. Este serviço consome esses jobs de forma assíncrona: a fila `email` processa envios de e-mail, e a fila `broadcast` entrega mensagens em tempo real via WebSocket.
 
 ```
 Driver Backend
-  └── publishEmailJob('family_invite' | 'forgot_password', payload)
+  ├── publishEmailJob('family_invite' | 'forgot_password', payload) → fila: email
+  └── publishBroadcastJob('broadcast_message', payload)             → fila: broadcast
           │
           ▼ BullMQ (Redis)
 email-worker
-  ├── Worker BullMQ → processa job → envia e-mail (Resend ou SMTP)
-  ├── WebSocket Server → emite email:status (sent | failed) para clientes
+  ├── EmailWorker     → fila 'email'     → envia e-mail (Brevo) → emite email:status via WS
+  ├── BroadcastWorker → fila 'broadcast' → emite message via WS (sem envio de e-mail)
+  ├── WebSocket Server → requer ?token=<ADMIN_API_KEY> na URL de conexão
   └── HTTP Server
         ├── GET  /health              (pública)
-        ├── POST /admin/message       (X-Admin-Key)
+        ├── POST /admin/message       (Header X-Admin-Key)
         └── GET  /admin/queues        (Basic Auth — Bull Board UI)
 ```
 
@@ -26,20 +28,22 @@ email-worker
 
 ## Funcionalidades
 
-### Tipos de job consumidos
+### Filas consumidas
 
-| Job | Descrição |
-|---|---|
-| `family_invite` | Envia e-mail de convite para um membro ingressar em uma família |
-| `forgot_password` | Envia e-mail com link de redefinição de senha |
-| `broadcast_message` | Emite mensagem via WebSocket para todos os clientes (sem envio de e-mail) |
+| Fila | Job | Descrição |
+|---|---|---|
+| `email` | `family_invite` | Envia e-mail de convite para um membro ingressar em uma família |
+| `email` | `forgot_password` | Envia e-mail com link de redefinição de senha |
+| `broadcast` | `broadcast_message` | Emite mensagem via WebSocket para todos os clientes conectados |
+
+> **Importante:** o job `broadcast_message` deve ser publicado na fila `broadcast`, não na fila `email`.
 
 ### Eventos WebSocket emitidos
 
 | Evento | Quando |
 |---|---|
 | `email:status` | Após envio ou falha definitiva de qualquer e-mail |
-| `message` | Quando o admin envia uma mensagem via `POST /admin/message` |
+| `message` | Quando o admin envia via `POST /admin/message` ou ao processar `broadcast_message` |
 
 ### Rotas HTTP
 
@@ -47,23 +51,7 @@ email-worker
 |---|---|---|---|
 | `GET` | `/health` | Pública | Status do serviço |
 | `POST` | `/admin/message` | Header `X-Admin-Key` | Envia mensagem broadcast para todos os clientes WebSocket |
-| `GET` | `/admin/queues` | Basic Auth | Bull Board — dashboard visual da fila BullMQ |
-
-### Bull Board
-
-Dashboard web em `/admin/queues` que exibe em tempo real o estado da fila de emails:
-
-- Jobs pendentes, ativos, concluídos e falhos
-- Payload de cada job
-- Histórico de tentativas e erros
-- Opção de **reprocessar jobs falhos** com um clique
-- Opção de **adicionar jobs manualmente** pela interface (para testes)
-
-**Acesso via browser:**
-```
-https://seu-servico.railway.app/admin/queues
-```
-O browser solicita usuário e senha. Use qualquer username (ex: `admin`) e a `ADMIN_API_KEY` como senha.
+| `GET` | `/admin/queues` | Basic Auth | Bull Board — dashboard visual das filas BullMQ |
 
 ---
 
@@ -72,25 +60,28 @@ O browser solicita usuário e senha. Use qualquer username (ex: `admin`) e a `AD
 ```
 email-worker/
 ├── src/
-│   ├── index.ts                   # Entry point — orquestra HTTP, WS e Worker
+│   ├── index.ts                   # Entry point — orquestra HTTP, WS e Workers
 │   ├── config.ts                  # Lê e valida variáveis de ambiente
 │   ├── logger.ts                  # Logger estruturado em JSON
+│   ├── redis.ts                   # Helper createRedisConnection (ioredis)
 │   ├── queue/
 │   │   ├── types.ts               # Tipos dos payloads de cada job
-│   │   └── worker.ts              # BullMQ Worker: dispatch, eventos, broadcast
+│   │   ├── worker.ts              # BullMQ Worker da fila 'email'
+│   │   └── broadcastWorker.ts     # BullMQ Worker da fila 'broadcast'
 │   ├── email/
-│   │   ├── send.ts                # Abstração de envio: Resend ou SMTP
+│   │   ├── send.ts                # Envio de e-mail via Brevo HTTP API
 │   │   ├── template.ts            # Renderizador de templates HTML
 │   │   └── handlers/
 │   │       ├── familyInvite.ts    # Monta e envia e-mail de convite
 │   │       └── forgotPassword.ts  # Monta e envia e-mail de reset
 │   ├── websocket/
-│   │   ├── server.ts              # WebSocket Server (compartilha http.Server)
+│   │   ├── server.ts              # WebSocket Server com autenticação por token
 │   │   └── broadcast.ts           # Função broadcast tipada
 │   └── http/
 │       ├── server.ts              # Express + http.Server
+│       ├── bullBoard.ts           # Configura Bull Board com IP allowlist
 │       ├── middleware/
-│       │   └── adminAuth.ts       # Valida header X-Admin-Key
+│       │   └── adminAuth.ts       # Valida header X-Admin-Key / Basic Auth
 │       └── routes/
 │           └── admin.ts           # POST /admin/message
 └── templates/
@@ -102,28 +93,41 @@ email-worker/
 
 ## Fila e retry
 
-O BullMQ gerencia retry automaticamente. Configuração aplicada a cada job:
+A configuração de retry (tentativas, backoff) deve ser definida pelo **produtor** ao enfileirar o job. O worker não impõe uma política própria.
 
-| Parâmetro | Valor |
-|---|---|
-| Tentativas máximas | 3 |
-| Estratégia de backoff | Exponencial |
-| Delay inicial | 2 segundos |
-| Jobs concluídos mantidos | 100 |
-| Jobs falhos mantidos | 500 |
+Recomendação para o Driver backend:
 
-Se um job falhar nas 3 tentativas, vai para a fila `failed` do BullMQ e um evento `email:status` com `status: "failed"` é emitido via WebSocket.
+```typescript
+await emailQueue.add('family_invite', payload, {
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 2000 },
+  removeOnComplete: 100,
+  removeOnFail: 500,
+});
+```
+
+Se um job falhar em todas as tentativas, vai para a fila `failed` do BullMQ e um evento `email:status` com `status: "failed"` é emitido via WebSocket.
 
 ---
 
 ## WebSocket
 
-O servidor WebSocket compartilha a mesma porta do servidor HTTP (Railway-compatible). Os clientes se conectam via:
+O servidor WebSocket compartilha a mesma porta do servidor HTTP. Os clientes **devem** enviar o token no header `Authorization` durante o handshake:
 
 ```
-ws://localhost:PORT         # local
-wss://seu-servico.railway.app  # produção
+Authorization: Bearer <ADMIN_API_KEY>
 ```
+
+Exemplo com a biblioteca `ws` (Node.js):
+```typescript
+const ws = new WebSocket('wss://seu-worker.exemplo.com', {
+  headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
+});
+```
+
+Conexões sem header ou com token inválido recebem `close(4401, 'Unauthorized')` e o evento é registrado em log com o IP de origem.
+
+> **Por que header em vez de query param?** Query params aparecem em logs de acesso de proxies (Nginx, Cloudflare) e ferramentas de monitoramento. O header `Authorization` não é logado por padrão.
 
 ### Evento `email:status`
 
@@ -145,12 +149,12 @@ Emitido após cada job de e-mail ser concluído ou falhar definitivamente.
 | `jobId` | `string` | ID do job BullMQ |
 | `type` | `string` | `family_invite` ou `forgot_password` |
 | `status` | `string` | `"sent"` ou `"failed"` |
-| `email` | `string?` | Presente em `sent`. Endereço de destino do e-mail enviado |
-| `error` | `string?` | Presente apenas em `failed`. Mensagem genérica, sem tokens |
+| `email` | `string?` | Presente em `sent`. Endereço de destino |
+| `error` | `string?` | Presente em `failed`. Mensagem genérica |
 
 ### Evento `message`
 
-Emitido quando o admin envia uma mensagem via `POST /admin/message` ou quando um job `broadcast_message` é processado.
+Emitido ao processar um job `broadcast_message` ou via `POST /admin/message`.
 
 ```json
 {
@@ -163,18 +167,23 @@ Emitido quando o admin envia uma mensagem via `POST /admin/message` ou quando um
 }
 ```
 
-| Campo | Tipo | Descrição |
-|---|---|---|
-| `event` | `string` | Sempre `"message"` |
-| `id` | `string` | UUID único da mensagem |
-| `type` | `string?` | Categoria da mensagem (ex: `announcement`, `notification`) |
-| `content` | `string` | Conteúdo da mensagem |
-| `createdAt` | `string` | ISO 8601 |
-| `target` | `string?` | `"broadcast"` ou identificador de canal (futuro) |
-
 ### Heartbeat
 
 O servidor envia `ping` a cada `WS_HEARTBEAT_INTERVAL_MS` (padrão: 30s). Conexões que não respondem com `pong` são encerradas automaticamente.
+
+---
+
+## Bull Board
+
+Dashboard web em `/admin/queues` com visualização em tempo real das filas `email` e `broadcast`:
+
+- Jobs pendentes, ativos, concluídos e falhos
+- Payload e histórico de tentativas de cada job
+- Reprocessamento de jobs falhos com um clique
+
+**Acesso:** qualquer username (ex: `admin`) + `ADMIN_API_KEY` como senha.
+
+**Restrição por IP (opcional):** defina `BULL_BOARD_ALLOWED_IPS` para limitar quais IPs podem acessar a dashboard. Se vazia, qualquer IP com credenciais válidas pode acessar.
 
 ---
 
@@ -198,12 +207,6 @@ X-Admin-Key: sua-chave-admin
 }
 ```
 
-| Campo | Tipo | Obrigatório | Descrição |
-|---|---|---|---|
-| `content` | `string` | Sim | Texto da mensagem |
-| `type` | `string` | Não | Categoria da mensagem |
-| `target` | `string` | Não | Padrão: `"broadcast"` |
-
 **Resposta 200:**
 ```json
 {
@@ -214,7 +217,7 @@ X-Admin-Key: sua-chave-admin
 
 **Exemplo com curl:**
 ```bash
-curl -X POST https://seu-servico.railway.app/admin/message \
+curl -X POST https://seu-worker.exemplo.com/admin/message \
   -H "Content-Type: application/json" \
   -H "X-Admin-Key: sua-chave-admin" \
   -d '{"type": "announcement", "content": "Manutenção programada às 22h"}'
@@ -222,132 +225,82 @@ curl -X POST https://seu-servico.railway.app/admin/message \
 
 ---
 
-## Provedores de email
-
-> **Railway free/hobby plan:** As portas SMTP (25, 465, 587, 2525) são bloqueadas. Use **Brevo** ou **Resend** — ambos enviam via HTTP API (porta 443).
-
-### Brevo (recomendado — gratuito, sem domínio)
-
-300 emails/dia gratuitos, para sempre. Não requer domínio próprio — basta verificar o e-mail remetente. Usa HTTP API (porta 443), compatível com Railway free.
-
-**Pré-requisitos:**
-1. Crie uma conta em [brevo.com](https://brevo.com)
-2. Vá em **Settings → Senders & IPs → Senders** e adicione/verifique seu e-mail remetente (ex: `seuapp@gmail.com`)
-3. Vá em **Settings → API Keys** e crie uma API Key
-4. Copie a chave gerada
-
-**Configuração:**
-```env
-EMAIL_PROVIDER=brevo
-BREVO_API_KEY=xkeysib-xxxxxxxxxxxx
-BREVO_FROM=seuapp@gmail.com
-BREVO_FROM_NAME=Driver App
-```
-
-Limite: 300 emails/dia. Remetente aparece como o e-mail verificado.
-
----
-
-### Resend (gratuito com domínio próprio)
-
-3.000 emails/mês, 100/dia — permanentemente gratuito. Requer domínio verificado para envio em produção (endereço `from` personalizado).
-
-**Configuração:**
-```env
-EMAIL_PROVIDER=resend
-RESEND_API_KEY=re_xxxxxxxxxxxx
-RESEND_FROM=noreply@seudominio.com
-```
-
----
-
-### Gmail SMTP (apenas desenvolvimento local)
-
-> **Não funciona no Railway free/hobby** — portas SMTP bloqueadas.
-
-Útil apenas para testes locais. Requer verificação em duas etapas e senha de app.
-
-**Configuração:**
-```env
-EMAIL_PROVIDER=smtp
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=seuapp@gmail.com
-SMTP_PASS=xxxx xxxx xxxx xxxx
-SMTP_FROM=seuapp@gmail.com
-```
-
----
-
 ## Variáveis de ambiente
-
-Copie `.env.example` para `.env` e preencha os valores.
 
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
 | `REDIS_URL` | Sim | — | URL de conexão com o Redis (ex: `redis://localhost:6379`) |
-| `ADMIN_API_KEY` | Sim | — | Chave para autenticar chamadas ao `POST /admin/message` |
-| `EMAIL_PROVIDER` | Não | `resend` | Provedor de e-mail: `brevo`, `resend` ou `smtp` |
-| `BREVO_API_KEY` | Se provider=brevo | — | Chave de API do Brevo (Settings → API Keys) |
-| `BREVO_FROM` | Se provider=brevo | — | E-mail remetente verificado no Brevo |
-| `BREVO_FROM_NAME` | Se provider=brevo | `Driver App` | Nome exibido no remetente |
-| `RESEND_API_KEY` | Se provider=resend | — | Chave de API do Resend |
-| `RESEND_FROM` | Se provider=resend | — | E-mail remetente (requer domínio verificado) |
-| `SMTP_HOST` | Se provider=smtp | — | Host SMTP (apenas dev local — bloqueado no Railway free) |
-| `SMTP_PORT` | Se provider=smtp | `587` | Porta SMTP |
-| `SMTP_USER` | Se provider=smtp | — | Usuário SMTP |
-| `SMTP_PASS` | Se provider=smtp | — | Senha SMTP |
-| `SMTP_FROM` | Se provider=smtp | — | E-mail remetente |
-| `FRONTEND_URL` | Não | `http://localhost:3001` | URL base do frontend (usada para construir links nos e-mails) |
+| `ADMIN_API_KEY` | Sim | — | Chave para autenticar `POST /admin/message`, Basic Auth do Bull Board e conexões WebSocket |
+| `BREVO_API_KEY` | Sim | — | Chave de API do Brevo (Settings → API Keys) |
+| `BREVO_FROM` | Sim | — | E-mail remetente verificado no Brevo |
+| `BREVO_FROM_NAME` | Não | `Driver App` | Nome exibido no remetente |
+| `FRONTEND_URL` | Sim | — | URL base do frontend (usada para construir links nos e-mails) |
 | `PORT` | Não | `3002` | Porta do servidor HTTP + WebSocket |
 | `WS_HEARTBEAT_INTERVAL_MS` | Não | `30000` | Intervalo do ping WebSocket em ms |
+| `BULL_BOARD_ALLOWED_IPS` | Não | `""` | IPs separados por vírgula autorizados a acessar `/admin/queues`. Se vazio, sem restrição de IP |
+
+---
+
+## Provedor de e-mail
+
+O serviço usa exclusivamente o **Brevo** para envio de e-mails via HTTP API (porta 443).
+
+**Pré-requisitos:**
+1. Crie uma conta em [brevo.com](https://brevo.com)
+2. Vá em **Settings → Senders & IPs → Senders** e verifique o e-mail remetente
+3. Vá em **Settings → API Keys** e crie uma API Key
+
+**Limite do plano gratuito:** 300 emails/dia.
+
+---
+
+## Deploy com Docker Compose
+
+O serviço possui seu próprio `docker-compose.yml` independente do projeto-driver. Isso permite deploys e restarts sem afetar os outros serviços.
+
+**Pré-requisito:** a rede `driver_net` deve existir (criada pelo docker-compose do projeto-driver).
+
+```bash
+# Na pasta do email-worker no servidor:
+cp .env.example .env
+# Preencha as variáveis no .env
+
+docker compose up -d
+```
+
+O Watchtower incluso no compose monitora apenas o container `driver_email_worker` (escopo isolado), sem interferir no Watchtower do projeto-driver.
 
 ---
 
 ## Rodando localmente
 
-### Pré-requisitos
-
-- Node.js 20+
-- Redis rodando localmente (`redis://localhost:6379`)
-- Provedor de e-mail configurado: Gmail SMTP (gratuito, veja seção acima) ou Resend
-
-### Instalação
+**Pré-requisitos:** Node.js 22+, Redis rodando localmente.
 
 ```bash
-git clone https://github.com/seu-usuario/email-worker.git
-cd email-worker
+git clone https://github.com/SamuelFontess/servico-mensageria.git
+cd servico-mensageria
 npm install
 cp .env.example .env
 # Preencha as variáveis no .env
 ```
 
-### Desenvolvimento
-
 ```bash
-npm run dev
+npm run dev    # desenvolvimento
+npm run build  # build TypeScript
+npm start      # produção
 ```
-
-### Build e produção
-
-```bash
-npm run build
-npm start
-```
-
-### Verificar se está rodando
 
 ```bash
 # Health check
 curl http://localhost:3002/health
 
 # Testar WebSocket (necessário wscat: npm i -g wscat)
-wscat -c ws://localhost:3002
+wscat -c ws://localhost:3002 -H "Authorization: Bearer sua-chave-admin"
 
 # Testar envio de mensagem admin
 curl -X POST http://localhost:3002/admin/message \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Key: sua-chave" \
+  -H "X-Admin-Key: sua-chave-admin" \
   -d '{"content": "Teste"}'
 ```
 
@@ -355,35 +308,33 @@ curl -X POST http://localhost:3002/admin/message \
 
 ## Payloads dos jobs (contrato com o Driver)
 
-O Driver backend publica jobs via BullMQ. Os payloads devem seguir este contrato:
-
-### `family_invite`
+### Fila `email` — job `family_invite`
 
 ```typescript
 {
-  invitationId: string;   // ID do FamilyMember
+  invitationId: string;
   familyId: string;
   familyName: string | null;
   invitedById: string;
   invitedUserId: string;
-  invitedEmail: string;   // destinatário do e-mail
-  inviterName: string;    // nome exibido no e-mail
+  invitedEmail: string;
+  inviterName: string;
   inviterEmail: string;
 }
 ```
 
-### `forgot_password`
+### Fila `email` — job `forgot_password`
 
 ```typescript
 {
   userId: string;
-  email: string;          // destinatário do e-mail
-  token: string;          // token raw — o worker constrói o link completo
-  expiresAt: string;      // ISO 8601
+  email: string;
+  token: string;       // token raw — o worker constrói o link completo
+  expiresAt: string;   // ISO 8601 — jobs com token já expirado são rejeitados imediatamente
 }
 ```
 
-### `broadcast_message`
+### Fila `broadcast` — job `broadcast_message`
 
 ```typescript
 {
@@ -399,9 +350,9 @@ O Driver backend publica jobs via BullMQ. Os payloads devem seguir este contrato
 
 | Tecnologia | Uso |
 |---|---|
-| Node.js + TypeScript | Runtime e linguagem |
-| BullMQ | Consumo de fila Redis |
+| Node.js 22 + TypeScript | Runtime e linguagem |
+| BullMQ | Consumo de filas Redis |
 | ioredis | Conexão com Redis |
 | ws | Servidor WebSocket |
-| Express | Servidor HTTP (health + admin) |
-| Resend / Nodemailer | Envio de e-mails |
+| Express | Servidor HTTP |
+| Brevo HTTP API | Envio de e-mails transacionais |

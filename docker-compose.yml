@@ -1,0 +1,44 @@
+services:
+  # ─── Email Worker ─────────────────────────────────────────────────────────
+  email-worker:
+    image: ghcr.io/samuelfontess/email-worker:latest
+    container_name: driver_email_worker
+    restart: unless-stopped
+    labels:
+      - com.centurylinklabs.watchtower.scope=email-worker
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      REDIS_URL: redis://redis:6379
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_FROM: ${BREVO_FROM}
+      BREVO_FROM_NAME: ${BREVO_FROM_NAME:-Driver App}
+      FRONTEND_URL: ${FRONTEND_URL}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      BULL_BOARD_ALLOWED_IPS: ${BULL_BOARD_ALLOWED_IPS:-}
+    networks:
+      - driver_net
+
+  # ─── Watchtower ───────────────────────────────────────────────────────────
+  watchtower-email:
+    image: containrrr/watchtower
+    container_name: watchtower_email
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_POLL_INTERVAL: 300
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      REPO_USER: samuelfontess
+      REPO_PASS: ${GITHUB_TOKEN}
+      # Monitora apenas containers com o label enable=true neste compose
+      WATCHTOWER_SCOPE: email-worker
+    labels:
+      - com.centurylinklabs.watchtower.scope=email-worker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - driver_net
+
+networks:
+  driver_net:
+    external: true  # criada pelo projeto-driver; email-worker entra nela para acessar redis

@@ -20,6 +20,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 COPY --from=builder /app/dist ./dist
+COPY templates ./templates
 
 EXPOSE 3002
 CMD ["node", "dist/index.js"]
