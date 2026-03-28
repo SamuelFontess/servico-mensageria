@@ -16,9 +16,7 @@ function ipAllowlist(req: Request, res: Response, next: NextFunction): void {
     return;
   }
 
-  const clientIp = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim()
-    ?? req.socket.remoteAddress
-    ?? '';
+  const clientIp = req.socket.remoteAddress ?? '';
 
   const allowedList = allowed.split(',').map((ip) => ip.trim());
   if (allowedList.includes(clientIp)) {
