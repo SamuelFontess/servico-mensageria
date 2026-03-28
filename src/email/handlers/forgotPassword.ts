@@ -3,16 +3,12 @@ import { sendEmail } from '../send';
 import { renderTemplate } from '../template';
 import type { ForgotPasswordPayload } from '../../queue/types';
 
-function minutesUntil(isoDate: string): number {
-  const diff = new Date(isoDate).getTime() - Date.now();
-  return Math.max(0, Math.round(diff / 60_000));
-}
-
 export async function handleForgotPassword(payload: ForgotPasswordPayload): Promise<void> {
-  const remaining = minutesUntil(payload.expiresAt);
-  if (remaining === 0) {
+  if (new Date(payload.expiresAt).getTime() <= Date.now()) {
     throw new Error(`Password reset token already expired for ${payload.email} (expiresAt: ${payload.expiresAt})`);
   }
+
+  const remaining = Math.max(1, Math.round((new Date(payload.expiresAt).getTime() - Date.now()) / 60_000));
 
   const resetLink = `${config.frontendUrl}/reset-password?token=${payload.token}`;
   const expiresIn = String(remaining);
