@@ -112,14 +112,22 @@ Se um job falhar em todas as tentativas, vai para a fila `failed` do BullMQ e um
 
 ## WebSocket
 
-O servidor WebSocket compartilha a mesma porta do servidor HTTP. Os clientes **devem** passar o token de autenticação na URL de conexão:
+O servidor WebSocket compartilha a mesma porta do servidor HTTP. Os clientes **devem** enviar o token no header `Authorization` durante o handshake:
 
 ```
-ws://localhost:3002?token=<ADMIN_API_KEY>           # local
-wss://seu-worker.exemplo.com?token=<ADMIN_API_KEY>  # produção
+Authorization: Bearer <ADMIN_API_KEY>
 ```
 
-Conexões sem token ou com token inválido recebem `close(4401, 'Unauthorized')` e o evento é registrado em log com o IP de origem.
+Exemplo com a biblioteca `ws` (Node.js):
+```typescript
+const ws = new WebSocket('wss://seu-worker.exemplo.com', {
+  headers: { Authorization: `Bearer ${ADMIN_API_KEY}` },
+});
+```
+
+Conexões sem header ou com token inválido recebem `close(4401, 'Unauthorized')` e o evento é registrado em log com o IP de origem.
+
+> **Por que header em vez de query param?** Query params aparecem em logs de acesso de proxies (Nginx, Cloudflare) e ferramentas de monitoramento. O header `Authorization` não é logado por padrão.
 
 ### Evento `email:status`
 
@@ -287,7 +295,7 @@ npm start      # produção
 curl http://localhost:3002/health
 
 # Testar WebSocket (necessário wscat: npm i -g wscat)
-wscat -c "ws://localhost:3002?token=sua-chave-admin"
+wscat -c ws://localhost:3002 -H "Authorization: Bearer sua-chave-admin"
 
 # Testar envio de mensagem admin
 curl -X POST http://localhost:3002/admin/message \

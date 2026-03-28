@@ -1,18 +1,15 @@
 import WebSocket from 'ws';
 import type { Server, IncomingMessage } from 'http';
-import { URL } from 'url';
 import { config } from '../config';
 import { logger } from '../logger';
 
 type AliveClient = WebSocket & { isAlive: boolean };
 
 function isAuthorized(req: IncomingMessage): boolean {
-  try {
-    const url = new URL(req.url ?? '/', `http://localhost`);
-    return url.searchParams.get('token') === config.http.adminApiKey;
-  } catch {
-    return false;
-  }
+  const auth = req.headers['authorization'];
+  return typeof auth === 'string' &&
+    auth.startsWith('Bearer ') &&
+    auth.slice(7) === config.http.adminApiKey;
 }
 
 export function createWebSocketServer(httpServer: Server): WebSocket.Server {
