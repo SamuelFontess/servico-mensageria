@@ -1,4 +1,4 @@
-export type EmailJobType = 'family_invite' | 'forgot_password' | 'broadcast_message';
+export type EmailJobType = 'family_invite' | 'forgot_password' | 'manual_email' | 'broadcast_message';
 
 export type FamilyInvitePayload = {
   invitationId: string;
@@ -16,6 +16,12 @@ export type ForgotPasswordPayload = {
   email: string;
   token: string;      // raw hex token — worker constrói o link
   expiresAt: string;  // ISO 8601
+};
+
+export type ManualEmailPayload = {
+  to: string;
+  subject: string;
+  html: string;
 };
 
 export type BroadcastMessagePayload = {

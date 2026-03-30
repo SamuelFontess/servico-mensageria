@@ -3,7 +3,7 @@ import WebSocket from 'ws';
 export type EmailStatusEvent = {
   event: 'email:status';
   jobId: string;
-  type: 'family_invite' | 'forgot_password';
+  type: 'family_invite' | 'forgot_password' | 'manual_email';
   status: 'sent' | 'failed';
   email?: string;
   error?: string;
