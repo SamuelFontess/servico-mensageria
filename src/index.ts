@@ -48,8 +48,18 @@ async function main(): Promise<void> {
     });
   }
 
-  process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err) => { logger.error('Shutdown error', { error: err.message }); process.exit(1); }); });
-  process.on('SIGINT', () => { shutdown('SIGINT').catch((err) => { logger.error('Shutdown error', { error: err.message }); process.exit(1); }); });
+  process.on('SIGTERM', () => {
+    shutdown('SIGTERM').catch((err) => {
+      logger.error('Shutdown error', { error: err.message });
+      process.exit(1);
+    });
+  });
+  process.on('SIGINT', () => {
+    shutdown('SIGINT').catch((err) => {
+      logger.error('Shutdown error', { error: err.message });
+      process.exit(1);
+    });
+  });
 
   // 7. Sobe o servidor na porta configurada
   server.listen(config.http.port, () => {
