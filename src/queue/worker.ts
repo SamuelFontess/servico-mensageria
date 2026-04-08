@@ -3,18 +3,25 @@ import type WebSocket from 'ws';
 import { createRedisConnection } from '../redis';
 import { logger } from '../logger';
 import { handleFamilyInvite } from '../email/handlers/familyInvite';
+import { handleFamilyInviteRegister } from '../email/handlers/familyInviteRegister';
 import { handleForgotPassword } from '../email/handlers/forgotPassword';
-import { broadcast } from '../websocket/broadcast';
+import { broadcast, type EmailStatusEvent } from '../websocket/broadcast';
 import { sendEmail } from '../email/send';
-import type { FamilyInvitePayload, ForgotPasswordPayload, ManualEmailPayload } from './types';
+import type { FamilyInvitePayload, FamilyInviteRegisterPayload, ForgotPasswordPayload, ManualEmailPayload } from './types';
 
 // NOTE: retry attempts and backoff must be configured by the producer when enqueuing.
 // Recommended: { attempts: 3, backoff: { type: 'exponential', delay: 2000 } }
+
+const EMAIL_JOB_TYPES = new Set(['family_invite', 'family_invite_register', 'forgot_password', 'manual_email']);
 
 async function dispatch(job: Job): Promise<void> {
   switch (job.name) {
     case 'family_invite':
       await handleFamilyInvite(job.data as FamilyInvitePayload);
+      break;
+
+    case 'family_invite_register':
+      await handleFamilyInviteRegister(job.data as FamilyInviteRegisterPayload);
       break;
 
     case 'forgot_password':
@@ -50,14 +57,16 @@ export function startWorker(wss: WebSocket.Server): Worker {
   worker.on('completed', (job) => {
     logger.info('Job completed', { jobId: job.id, type: job.name });
 
-    if (job.name === 'family_invite' || job.name === 'forgot_password' || job.name === 'manual_email') {
-      const data = job.data as { invitedEmail?: string; email?: string; to?: string };
+    if (EMAIL_JOB_TYPES.has(job.name)) {
+      const data = job.data as { invitedById?: string; userId?: string; invitedEmail?: string; email?: string; to?: string };
       const email = data?.invitedEmail ?? data?.email ?? data?.to;
+      const userId = data?.invitedById ?? data?.userId;
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',
-        type: job.name,
+        type: job.name as EmailStatusEvent['type'],
         status: 'sent',
+        ...(userId && { userId }),
         ...(email && { email }),
       });
     }
@@ -74,12 +83,15 @@ export function startWorker(wss: WebSocket.Server): Worker {
     });
 
     const isFinal = job.attemptsMade >= (job.opts.attempts ?? 1);
-    if (isFinal && (job.name === 'family_invite' || job.name === 'forgot_password' || job.name === 'manual_email')) {
+    if (isFinal && EMAIL_JOB_TYPES.has(job.name)) {
+      const data = job.data as { invitedById?: string; userId?: string };
+      const userId = data?.invitedById ?? data?.userId;
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',
-        type: job.name,
+        type: job.name as EmailStatusEvent['type'],
         status: 'failed',
+        ...(userId && { userId }),
         error: err.message,
       });
     }
