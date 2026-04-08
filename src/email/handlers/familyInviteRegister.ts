@@ -10,7 +10,10 @@ export async function handleFamilyInviteRegister(payload: FamilyInviteRegisterPa
     invitedById: payload.invitedById,
   });
 
-  const registerLink = `${config.frontendUrl}/register?email=${encodeURIComponent(payload.invitedEmail)}&invitationId=${payload.invitationId}`;
+  const url = new URL('/register', config.frontendUrl);
+  url.searchParams.set('email', payload.invitedEmail);
+  url.searchParams.set('invitationId', payload.invitationId);
+  const registerLink = url.toString();
   const familyName = payload.familyName ?? 'a família';
 
   const html = renderTemplate('family-invite-register.html', {
