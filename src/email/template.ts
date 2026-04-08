@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const ALLOWED_TEMPLATES = new Set(['family-invite.html', 'forgot-password.html']);
+const ALLOWED_TEMPLATES = new Set(['family-invite.html', 'family-invite-register.html', 'forgot-password.html']);
 
 function escapeHtml(value: string): string {
   return value

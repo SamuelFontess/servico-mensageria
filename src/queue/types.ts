@@ -1,4 +1,4 @@
-export type EmailJobType = 'family_invite' | 'forgot_password' | 'manual_email' | 'broadcast_message';
+export type EmailJobType = 'family_invite' | 'family_invite_register' | 'forgot_password' | 'manual_email' | 'broadcast_message';
 
 export type FamilyInvitePayload = {
   invitationId: string;
@@ -6,6 +6,16 @@ export type FamilyInvitePayload = {
   familyName: string | null;
   invitedById: string;
   invitedUserId: string;
+  invitedEmail: string;
+  inviterName: string;
+  inviterEmail: string;
+};
+
+export type FamilyInviteRegisterPayload = {
+  invitationId: string;
+  familyId: string;
+  familyName: string | null;
+  invitedById: string;
   invitedEmail: string;
   inviterName: string;
   inviterEmail: string;
