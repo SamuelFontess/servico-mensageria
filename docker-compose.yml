@@ -5,6 +5,7 @@ services:
     container_name: driver_email_worker
     restart: unless-stopped
     labels:
+      - com.centurylinklabs.watchtower.enable=true
       - com.centurylinklabs.watchtower.scope=email-worker
     environment:
       NODE_ENV: production
@@ -30,14 +31,14 @@ services:
       WATCHTOWER_POLL_INTERVAL: 300
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_LABEL_ENABLE: "true"
-      REPO_USER: samuelfontess
-      REPO_PASS: ${GITHUB_TOKEN}
+      DOCKER_CONFIG: /config
       # Monitora apenas containers com o label enable=true neste compose
       WATCHTOWER_SCOPE: email-worker
     labels:
       - com.centurylinklabs.watchtower.scope=email-worker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /root/.docker:/config:ro
     networks:
       - driver_net
 
