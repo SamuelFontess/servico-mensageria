@@ -28,15 +28,20 @@ router.post('/admin/message', adminAuth, async (req, res) => {
     return;
   }
 
-  const job = await broadcastQueue.add('broadcast_message', {
-    type,
-    content: content.trim(),
-    target: target ?? 'broadcast',
-  });
+  try {
+    const job = await broadcastQueue.add('broadcast_message', {
+      type,
+      content: content.trim(),
+      target: target ?? 'broadcast',
+    });
 
-  logger.info('Admin message enqueued', { jobId: job.id, type });
+    logger.info('Admin message enqueued', { jobId: job.id, type });
 
-  res.status(200).json({ id: job.id, createdAt: new Date().toISOString() });
+    res.status(200).json({ id: job.id, createdAt: new Date().toISOString() });
+  } catch (err) {
+    logger.error('Failed to enqueue broadcast message', err instanceof Error ? { message: err.message } : {});
+    res.status(500).json({ error: 'Falha ao enfileirar mensagem' });
+  }
 });
 
 export { router as adminRouter };

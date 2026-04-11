@@ -89,14 +89,16 @@ export function startWorker(wss: WebSocket.Server): Worker {
 
     const isFinal = job.attemptsMade >= (job.opts.attempts ?? 1);
     if (isFinal && EMAIL_JOB_TYPES.has(job.name)) {
-      const data = job.data as { invitedById?: string; userId?: string };
+      const data = job.data as { invitedById?: string; userId?: string; invitedEmail?: string; email?: string; to?: string };
       const userId = data?.invitedById ?? data?.userId;
+      const email = data?.invitedEmail ?? data?.email ?? data?.to;
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',
         type: job.name as EmailStatusEvent['type'],
         status: 'failed',
         ...(userId && { userId }),
+        ...(email && { email }),
         error: err.message,
       });
     }
