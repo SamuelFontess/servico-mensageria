@@ -5,14 +5,15 @@ import { logger } from '../logger';
 import { handleFamilyInvite } from '../email/handlers/familyInvite';
 import { handleFamilyInviteRegister } from '../email/handlers/familyInviteRegister';
 import { handleForgotPassword } from '../email/handlers/forgotPassword';
+import { handleBroadcastEmail } from '../email/handlers/broadcastEmail';
 import { broadcast, type EmailStatusEvent } from '../websocket/broadcast';
 import { sendEmail } from '../email/send';
-import type { FamilyInvitePayload, FamilyInviteRegisterPayload, ForgotPasswordPayload, ManualEmailPayload } from './types';
+import type { FamilyInvitePayload, FamilyInviteRegisterPayload, ForgotPasswordPayload, ManualEmailPayload, BroadcastEmailPayload } from './types';
 
 // NOTE: retry attempts and backoff must be configured by the producer when enqueuing.
 // Recommended: { attempts: 3, backoff: { type: 'exponential', delay: 2000 } }
 
-const EMAIL_JOB_TYPES = new Set(['family_invite', 'family_invite_register', 'forgot_password', 'manual_email']);
+const EMAIL_JOB_TYPES = new Set(['family_invite', 'family_invite_register', 'forgot_password', 'manual_email', 'broadcast_email']);
 
 async function dispatch(job: Job): Promise<void> {
   switch (job.name) {
@@ -33,6 +34,10 @@ async function dispatch(job: Job): Promise<void> {
       await sendEmail({ to, subject, html });
       break;
     }
+
+    case 'broadcast_email':
+      await handleBroadcastEmail(job.data as BroadcastEmailPayload);
+      break;
 
     default:
       throw new Error(`Unknown job type: ${job.name}`);
@@ -84,14 +89,16 @@ export function startWorker(wss: WebSocket.Server): Worker {
 
     const isFinal = job.attemptsMade >= (job.opts.attempts ?? 1);
     if (isFinal && EMAIL_JOB_TYPES.has(job.name)) {
-      const data = job.data as { invitedById?: string; userId?: string };
+      const data = job.data as { invitedById?: string; userId?: string; invitedEmail?: string; email?: string; to?: string };
       const userId = data?.invitedById ?? data?.userId;
+      const email = data?.invitedEmail ?? data?.email ?? data?.to;
       broadcast(wss, {
         event: 'email:status',
         jobId: job.id ?? '',
         type: job.name as EmailStatusEvent['type'],
         status: 'failed',
         ...(userId && { userId }),
+        ...(email && { email }),
         error: err.message,
       });
     }
