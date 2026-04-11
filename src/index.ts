@@ -15,8 +15,8 @@ async function main(): Promise<void> {
   // 2. Anexa o WebSocket server ao mesmo http.Server
   const wss = createWebSocketServer(server);
 
-  // 3. Registra rota admin (precisa do wss já criado)
-  app.use(adminRouter(wss));
+  // 3. Registra rota admin
+  app.use(adminRouter);
 
   // 4. Monta o Bull Board em /admin/queues (protegido por IP + API key)
   setupBullBoard(app);

@@ -1,39 +1,42 @@
 import { Router } from 'express';
-import { randomUUID } from 'crypto';
-import type WebSocket from 'ws';
+import { Queue } from 'bullmq';
 import { adminAuth } from '../middleware/adminAuth';
-import { broadcast } from '../../websocket/broadcast';
+import { createRedisConnection } from '../../redis';
 import { logger } from '../../logger';
 
-export function adminRouter(wss: WebSocket.Server): Router {
-  const router = Router();
+const broadcastQueue = new Queue('broadcast', {
+  connection: createRedisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 2000 },
+    removeOnComplete: 100,
+    removeOnFail: 500,
+  },
+});
 
-  router.post('/admin/message', adminAuth, (req, res) => {
-    const { type, content, target } = req.body as {
-      type?: string;
-      content?: string;
-      target?: string;
-    };
+const router = Router();
 
-    if (!content || typeof content !== 'string' || !content.trim()) {
-      res.status(400).json({ error: 'content is required' });
-      return;
-    }
+router.post('/admin/message', adminAuth, async (req, res) => {
+  const { type, content, target } = req.body as {
+    type?: string;
+    content?: string;
+    target?: string;
+  };
 
-    const event = {
-      event: 'message' as const,
-      id: randomUUID(),
-      type,
-      content: content.trim(),
-      createdAt: new Date().toISOString(),
-      target: target ?? 'broadcast',
-    };
+  if (!content || typeof content !== 'string' || !content.trim()) {
+    res.status(400).json({ error: 'content is required' });
+    return;
+  }
 
-    broadcast(wss, event);
-    logger.info('Admin message broadcast', { id: event.id, type: event.type });
-
-    res.status(200).json({ id: event.id, createdAt: event.createdAt });
+  const job = await broadcastQueue.add('broadcast_message', {
+    type,
+    content: content.trim(),
+    target: target ?? 'broadcast',
   });
 
-  return router;
-}
+  logger.info('Admin message enqueued', { jobId: job.id, type });
+
+  res.status(200).json({ id: job.id, createdAt: new Date().toISOString() });
+});
+
+export { router as adminRouter };
