@@ -5,14 +5,15 @@ import { logger } from '../logger';
 import { handleFamilyInvite } from '../email/handlers/familyInvite';
 import { handleFamilyInviteRegister } from '../email/handlers/familyInviteRegister';
 import { handleForgotPassword } from '../email/handlers/forgotPassword';
+import { handleBroadcastEmail } from '../email/handlers/broadcastEmail';
 import { broadcast, type EmailStatusEvent } from '../websocket/broadcast';
 import { sendEmail } from '../email/send';
-import type { FamilyInvitePayload, FamilyInviteRegisterPayload, ForgotPasswordPayload, ManualEmailPayload } from './types';
+import type { FamilyInvitePayload, FamilyInviteRegisterPayload, ForgotPasswordPayload, ManualEmailPayload, BroadcastEmailPayload } from './types';
 
 // NOTE: retry attempts and backoff must be configured by the producer when enqueuing.
 // Recommended: { attempts: 3, backoff: { type: 'exponential', delay: 2000 } }
 
-const EMAIL_JOB_TYPES = new Set(['family_invite', 'family_invite_register', 'forgot_password', 'manual_email']);
+const EMAIL_JOB_TYPES = new Set(['family_invite', 'family_invite_register', 'forgot_password', 'manual_email', 'broadcast_email']);
 
 async function dispatch(job: Job): Promise<void> {
   switch (job.name) {
@@ -33,6 +34,10 @@ async function dispatch(job: Job): Promise<void> {
       await sendEmail({ to, subject, html });
       break;
     }
+
+    case 'broadcast_email':
+      await handleBroadcastEmail(job.data as BroadcastEmailPayload);
+      break;
 
     default:
       throw new Error(`Unknown job type: ${job.name}`);
